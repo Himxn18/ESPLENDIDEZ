@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import Hero from "./Hero";
+import ThemeToggle from "./ThemeToggle";
 import {
   Play, Pause, Volume2, VolumeX, X, ArrowUpRight, Trophy, Users, Building2,
   CalendarDays, Mail, MessageCircle, MapPin, Menu, Cpu, Gamepad2, Clock, Ticket,
@@ -89,11 +91,13 @@ const OFFICIAL = { email: "esplendidez27@gmail.com", insta: "esplendidez_27" };
 
 const NAV = ["Home", "Events", "Updates", "Schedule", "About", "Contact"];
 const waLink = (p) => `https://wa.me/${p}?text=${encodeURIComponent(CONFIG.waMessage)}`;
+/* Register buttons: open the link in a new tab, or jump to Contact until a real link is set */
+const regProps = CONFIG.registerUrl ? { href: CONFIG.registerUrl, target: "_blank", rel: "noreferrer" } : { href: "#contact" };
 
 /* ============ Shared style tokens ============ */
 const silver = "bg-gradient-to-r from-white via-zinc-100 to-[#B8C2FF] bg-clip-text text-transparent";
 const gold = "bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0] bg-clip-text text-transparent";
-const card = "rounded-2xl border border-white/10 bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.02)] backdrop-blur-sm transition-all duration-300 hover:border-zinc-500/50";
+const card = "rounded-2xl border border-white/10 bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.02)] transition-all duration-300 hover:border-zinc-500/50";
 const btnGold = "inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#B9C6FF] via-[#B4A4FF] to-[#E9A8D6] px-6 py-3 text-sm font-semibold text-[#0B0B1A] transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[#A9A4FF]/25";
 const btnGhost = "inline-flex items-center justify-center gap-2 rounded-full border border-white/20 px-6 py-3 text-sm font-medium text-white transition-all duration-300 ease-out hover:-translate-y-0.5 hover:border-zinc-400/60 hover:bg-white/5";
 
@@ -102,6 +106,40 @@ const Instagram = ({ size = 16 }) => (
     <rect x="2" y="2" width="20" height="20" rx="5" /><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" /><line x1="17.5" y1="6.5" x2="17.51" y2="6.5" />
   </svg>
 );
+
+/* ============ Performance helpers ============ */
+/* pauses every CSS animation inside an element while it is scrolled out of view */
+function useOffscreenPause(ref) {
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    const io = new IntersectionObserver(([e]) => { el.dataset.off = e.isIntersecting ? "0" : "1"; }, { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref]);
+}
+
+/* numbers count up once when scrolled into view ("₹1.5 Lakh+", "5,000+" both work) */
+function CountUp({ value }) {
+  const ref = useRef(null);
+  const [txt, setTxt] = useState(value);
+  useEffect(() => {
+    const m = String(value).match(/^(\D*)([\d,]*\.?\d+)(.*)$/);
+    if (!m || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const [, pre, num, suf] = m;
+    const target = parseFloat(num.replace(/,/g, "")), dec = (num.split(".")[1] || "").length;
+    const f = (n) => n.toLocaleString("en-IN", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+    setTxt(pre + f(0) + suf);
+    const io = new IntersectionObserver(([e]) => {
+      if (!e.isIntersecting) return; io.disconnect();
+      const t0 = performance.now();
+      const step = (t) => { const p = Math.min((t - t0) / 1400, 1); setTxt(pre + f(target * (1 - Math.pow(1 - p, 3))) + suf); if (p < 1) requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+    }, { threshold: 0.5 });
+    io.observe(ref.current);
+    return () => io.disconnect();
+  }, [value]);
+  return <span ref={ref}>{txt}</span>;
+}
 
 /* ============ Scroll reveal (fades and lifts content in once) ============ */
 function Reveal({ children, delay = 0, className = "" }) {
@@ -116,12 +154,39 @@ function Reveal({ children, delay = 0, className = "" }) {
   return <div ref={ref} className={`rv ${on ? "in" : ""} ${className}`} style={{ "--d": `${delay}s` }}>{children}</div>;
 }
 
+/* section title with a huge outlined index number and a glowing rule */
+function SectionHead({ n, title, sub }) {
+  return (
+    <Reveal>
+      <div className="relative">
+        <span className="pointer-events-none absolute -left-2 -top-10 select-none text-[8rem] font-extrabold leading-none sm:text-[11rem]" style={{ WebkitTextStroke: "1px rgba(255,255,255,0.08)", color: "transparent" }} aria-hidden="true">{n}</span>
+        <h2 className={`relative text-4xl font-semibold tracking-tight sm:text-5xl ${silver}`}>{title}</h2>
+        <span className="relative mt-4 block h-px w-24 bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-transparent shadow-[0_0_12px_rgba(196,163,255,0.8)]" aria-hidden="true" />
+        {sub && <p className="relative mt-4 max-w-lg text-zinc-300">{sub}</p>}
+      </div>
+    </Reveal>
+  );
+}
+
+/* quiet backdrop for a section: two soft glows, a fading dot texture and a hairline. Static, so no scroll cost */
+function SectionGlow({ c1 = "155,180,255", c2 = "242,166,208", side = "left" }) {
+  const other = side === "left" ? "right" : "left";
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+      <div className="absolute inset-0 opacity-40 [background-image:radial-gradient(rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:28px_28px] [mask-image:radial-gradient(ellipse_70%_55%_at_50%_0%,black,transparent)]" />
+      <div className="absolute -top-24 h-[28rem] w-[28rem] rounded-full" style={{ [side]: "-9rem", background: `radial-gradient(closest-side, rgba(${c1},0.10), transparent)` }} />
+      <div className="absolute bottom-0 h-[24rem] w-[24rem] rounded-full" style={{ [other]: "-7rem", background: `radial-gradient(closest-side, rgba(${c2},0.07), transparent)` }} />
+    </div>
+  );
+}
+
 /* ============ Floating glass icons; they drift and follow the pointer inside the hero ============ */
 function FloatIcons({ items, show = "hidden sm:block" }) {
   return items.map(({ Icon, pos, depth = 20, size = 20, dur = 7, del = 0 }, i) => (
     <div key={i} aria-hidden="true" className={`pointer-events-none absolute z-[5] transition-transform duration-700 ease-out ${show} ${pos}`}
       style={{ transform: `translate3d(calc(var(--mx,0)*${depth}px),calc(var(--my,0)*${depth}px),0)` }}>
-      <span className="float grid h-12 w-12 place-items-center rounded-2xl border border-white/15 bg-white/[0.06] text-[#C4A3FF] shadow-lg shadow-black/30 backdrop-blur-md" style={{ "--dur": `${dur}s`, "--del": `${del}s` }}>
+      <span className="float grid h-12 w-12 place-items-center rounded-2xl border border-white/15 bg-white/[0.06] text-[#C4A3FF] shadow-lg shadow-black/30" style={{ "--dur": `${dur}s`, "--del": `${del}s` }}>
         <Icon size={size} />
       </span>
     </div>
@@ -143,7 +208,7 @@ function Headliner() {
           <div className="absolute right-6 top-6 flex h-8 items-end gap-1 sm:right-10 sm:top-8" aria-hidden="true">
             {[0, 1, 2, 3, 4].map((i) => <span key={i} className="eq" style={{ animationDelay: `${i * 0.15}s` }} />)}
           </div>
-          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-black/40 px-3 py-1 text-xs font-medium text-white backdrop-blur-md"><Star size={12} className="text-[#F2A6D0]" /> Headliner</span>
+          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-white/20 bg-black/50 px-3 py-1 text-xs font-medium text-white"><Star size={12} className="text-[#F2A6D0]" /> Headliner</span>
           <h3 className="ez-grad mt-4 text-4xl font-extrabold leading-tight tracking-tight sm:text-6xl">Main Artist Show</h3>
           <p className="mt-3 max-w-md text-sm text-zinc-200 sm:text-base">Day 3 closes with the headline performance. The artist will be revealed on our Instagram page.</p>
           <span className="mt-5 inline-flex w-fit items-center gap-2 text-sm text-zinc-300"><Moon size={14} className="text-[#9A7CFF]" /> Day 3 · Night</span>
@@ -158,12 +223,14 @@ const TICKER = ["Stay tuned", "Follow for updates", "Esplendidez '27", "Departme
 function UpdatesSign() {
   const [lit, setLit] = useState(false);
   const [bad, setBad] = useState(false);
+  const root = useRef(null);
+  useOffscreenPause(root);
   const COLORS = ["#9BB4FF", "#C4A3FF", "#F2A6D0"];
   const row = (n, off = 0) => Array.from({ length: n }, (_, i) => (
     <span key={i} className="bulb" style={{ "--c": COLORS[(i + off) % 3], animationDelay: `${(i % 6) * 0.25}s` }} />
   ));
   return (
-    <div className={`rounded-[2rem] transition-shadow duration-500 ${lit ? "shadow-[0_0_90px_-12px_rgba(164,150,255,0.6)]" : ""}`}>
+    <div ref={root} className={`rounded-[2rem] transition-shadow duration-500 ${lit ? "shadow-[0_0_90px_-12px_rgba(164,150,255,0.6)]" : ""}`}>
       <div className="stub-notch rounded-[2rem] bg-gradient-to-br from-[#9BB4FF]/60 via-white/10 to-[#F2A6D0]/50 p-px">
         <div className={`${lit ? "lit " : ""}relative overflow-hidden rounded-[calc(2rem-1px)] bg-[#0B0C12] px-6 py-16 text-center sm:px-16 sm:py-20`}>
           {!bad && <img src={CONFIG.signImage} alt="" onError={() => setBad(true)} className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ${lit ? "opacity-60" : "opacity-35"}`} />}
@@ -182,7 +249,7 @@ function UpdatesSign() {
                 {[0, 1, 2, 3].map((k) => TICKER.map((t) => <span key={`${k}-${t}`} className="flex items-center gap-10">{t}<Sparkles size={12} className="text-[#C4A3FF]" /></span>))}
               </div>
             </div>
-            <button onClick={() => setLit(!lit)} aria-pressed={lit} className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium text-zinc-200 backdrop-blur-md transition hover:border-zinc-400/60">
+            <button onClick={() => setLit(!lit)} aria-pressed={lit} className="mt-8 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-1.5 text-xs font-medium text-zinc-200 transition hover:border-zinc-400/60">
               <Lightbulb size={14} className={lit ? "text-[#F2A6D0]" : "text-zinc-400"} /> {lit ? "Lights on" : "Tap to switch the lights on"}
             </button>
             <h2 className="ez-grad mt-6 text-[clamp(2.4rem,10vw,5.5rem)] font-extrabold leading-none tracking-tight">STAY TUNED!</h2>
@@ -204,49 +271,51 @@ function Logo({ className = "h-9", fallback = true }) {
   return <img src={CONFIG.logoSrc} alt="Esplendidez logo" onError={() => setBad(true)} className={`${className} w-auto shrink-0 object-contain`} />;
 }
 
-/* ============ Three.js particle wave (monochrome, behind content) ============ */
+/* ============ Three.js particle wave: 30fps cap, skipped on weak devices, pauses offscreen / hidden tab ============ */
 function ParticleWave() {
   const ref = useRef(null);
   useEffect(() => {
     const el = ref.current;
-    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const low = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4 || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (low) return; // weak devices keep the video smooth instead of running WebGL on top of it
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
     camera.position.set(0, 4, 12);
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "low-power" });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     el.appendChild(renderer.domElement);
-    const COLS = 60, ROWS = 34, SEP = 0.5;
+    const COLS = 48, ROWS = 28, SEP = 0.6;
     const pos = new Float32Array(COLS * ROWS * 3);
     let i = 0;
     for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) { pos[i++] = (x - COLS / 2) * SEP; pos[i++] = 0; pos[i++] = (z - ROWS / 2) * SEP; }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xA9B6FF, size: 0.04, transparent: true, opacity: 0.4, sizeAttenuation: true });
+    const mat = new THREE.PointsMaterial({ color: 0xA9B6FF, size: 0.05, transparent: true, opacity: 0.4, sizeAttenuation: true });
     const pts = new THREE.Points(geo, mat);
     scene.add(pts);
     const m = { x: 0, y: 0, tx: 0, ty: 0 };
     const onMove = (e) => { m.tx = (e.clientX / window.innerWidth - 0.5) * 2; m.ty = (e.clientY / window.innerHeight - 0.5) * 2; };
-    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointermove", onMove, { passive: true });
     const resize = () => { const { clientWidth: w, clientHeight: h } = el; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); };
     resize(); window.addEventListener("resize", resize);
-    let raf, visible = true;
+    let raf, visible = true, last = 0;
     const io = new IntersectionObserver(([en]) => { visible = en.isIntersecting; });
     io.observe(el);
     const clock = new THREE.Clock();
-    const tick = () => {
+    const tick = (now) => {
       raf = requestAnimationFrame(tick);
-      if (!visible) return;
-      const t = clock.getElapsedTime() * (reduce ? 0.1 : 0.45);
+      if (!visible || document.hidden || now - last < 33) return; // ~30fps
+      last = now;
+      const t = clock.getElapsedTime() * 0.45;
       const p = geo.attributes.position.array;
       let k = 1;
       for (let x = 0; x < COLS; x++) for (let z = 0; z < ROWS; z++) { p[k] = Math.sin(x * 0.3 + t) * 0.42 + Math.cos(z * 0.38 + t * 1.05) * 0.42; k += 3; }
       geo.attributes.position.needsUpdate = true;
-      m.x += (m.tx - m.x) * 0.04; m.y += (m.ty - m.y) * 0.04;
+      m.x += (m.tx - m.x) * 0.06; m.y += (m.ty - m.y) * 0.06;
       pts.rotation.y = m.x * 0.2; camera.position.y = 4 - m.y;
       camera.lookAt(0, 0, 0); renderer.render(scene, camera);
     };
-    tick();
+    raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf); io.disconnect();
       window.removeEventListener("pointermove", onMove); window.removeEventListener("resize", resize);
@@ -254,7 +323,8 @@ function ParticleWave() {
       if (el.contains(renderer.domElement)) el.removeChild(renderer.domElement);
     };
   }, []);
-  return <div ref={ref} className="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" aria-hidden="true" />;
+  /* no mask-image here: masking a live WebGL canvas over a playing video causes video stutter */
+  return <div ref={ref} className="absolute inset-0" aria-hidden="true" />;
 }
 
 /* ============ Full-screen teaser with sound ============ */
@@ -295,13 +365,18 @@ function CategoryTile({ cat, big, onOpen }) {
   const list = catEvents(cat), [c1, c2] = CAT[cat], Icon = CAT_ICON[cat];
   const ref = useRef(null);
   const move = (e) => {
-    const r = ref.current.getBoundingClientRect();
-    ref.current.style.setProperty("--cx", `${e.clientX - r.left}px`); ref.current.style.setProperty("--cy", `${e.clientY - r.top}px`);
+    const r = ref.current.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    ref.current.style.setProperty("--cx", `${x}px`); ref.current.style.setProperty("--cy", `${y}px`);
+    if (e.pointerType === "mouse") {
+      ref.current.style.setProperty("--ry", `${(x / r.width - 0.5) * 6}deg`);
+      ref.current.style.setProperty("--rx", `${-(y / r.height - 0.5) * 6}deg`);
+    }
   };
+  const leave = () => { ref.current.style.setProperty("--rx", "0deg"); ref.current.style.setProperty("--ry", "0deg"); };
   const shown = list.slice(0, big ? 7 : 4);
   return (
-    <button ref={ref} onPointerMove={move} onClick={onOpen} aria-label={`Open ${cat} events`}
-      className="group relative block h-full w-full rounded-3xl p-px text-left transition-transform duration-300 ease-out hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C4A3FF]"
+    <button ref={ref} onPointerMove={move} onPointerLeave={leave} onClick={onOpen} aria-label={`Open ${cat} events`}
+      className="tilt group relative block h-full w-full rounded-3xl p-px text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#C4A3FF]"
       style={{ background: `linear-gradient(135deg,${c1}99,rgba(255,255,255,0.08) 45%,${c2}88)` }}>
       <span className="relative flex h-full min-h-[17rem] flex-col overflow-hidden rounded-[calc(1.5rem-1px)] bg-[#0B0D13] p-7 sm:p-8">
         <span className="pointer-events-none absolute inset-0 opacity-60 transition-opacity duration-500 group-hover:opacity-100" style={{ background: `radial-gradient(ellipse at 100% 0%, ${c1}30, transparent 60%), radial-gradient(ellipse at 0% 100%, ${c2}22, transparent 55%)` }} />
@@ -318,7 +393,7 @@ function CategoryTile({ cat, big, onOpen }) {
           {list.length > shown.length && <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-zinc-400">+{list.length - shown.length} more</span>}
         </span>
         <span className="relative mt-auto flex items-end justify-between pt-8">
-          <span><span className="block text-xs text-zinc-400">Top prize up to</span><span className="ez-grad text-2xl font-bold">{fmt(topPrize(cat))}</span></span>
+          <span><span className="block text-xs text-zinc-400">Top prize up to</span><span className="ez-static text-2xl font-bold">{fmt(topPrize(cat))}</span></span>
           <span className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-full border border-white/20 text-white transition-colors duration-300 group-hover:text-[#0B0B1A]">
             <span className="absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{ background: `linear-gradient(135deg,${c1},${c2})` }} />
             <ArrowUpRight size={18} className="relative" />
@@ -341,6 +416,24 @@ function EventBanner({ ev }) {
   );
 }
 
+/* prizes as a podium: 1st in the centre and tallest (stacked 1st, 2nd, 3rd on phones) */
+function Podium({ ev, c1, c2 }) {
+  const list = [[1, "1st prize", ev.p1], [2, "2nd prize", ev.p2], [3, "3rd prize", ev.p3]].filter(([, , v]) => v);
+  const col = { 1: "sm:col-start-2", 2: "sm:col-start-1", 3: "sm:col-start-3" };
+  const h = { 1: "sm:min-h-[8.5rem]", 2: "sm:min-h-[7rem]", 3: "sm:min-h-[6rem]" };
+  return (
+    <dl className="podium mt-6 text-sm" style={{ "--n": list.length }}>
+      {list.map(([r, k, v]) => (
+        <div key={r} className={`flex flex-col justify-end rounded-2xl border p-4 sm:row-start-1 ${col[r]} ${h[r]} ${r === 1 ? "border-transparent text-[#0B0B1A]" : "border-white/10 bg-white/[0.03]"}`}
+          style={r === 1 ? { background: `linear-gradient(135deg,${c1},${c2})`, boxShadow: `0 18px 40px -18px ${c1}` } : undefined}>
+          <dt className={`flex items-center gap-1.5 ${r === 1 ? "text-[#0B0B1A]/70" : "text-zinc-400"}`}>{r === 1 ? <Crown size={14} /> : <Medal size={14} />}{k}</dt>
+          <dd className={`mt-1 font-semibold ${r === 1 ? "" : "text-white"}`}>{v}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function CategoryPanel({ cat, onCat, onClose }) {
   const [sel, setSel] = useState(null);
   const navRef = useRef(null);
@@ -354,7 +447,6 @@ function CategoryPanel({ cat, onCat, onClose }) {
     return () => { window.removeEventListener("keydown", esc); document.body.style.overflow = ""; };
   }, [onClose]);
   const go = (c) => { setSel(null); onCat(c); };
-  const prizes = [["1st prize", ev.p1, true], ["2nd prize", ev.p2], ["3rd prize", ev.p3]];
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center overflow-hidden p-2 sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label={`${cat} events`}>
       <div className="absolute inset-0 bg-black/80" onClick={onClose} />
@@ -404,19 +496,11 @@ function CategoryPanel({ cat, onCat, onClose }) {
                   {ev.note && <p className="mt-1 text-sm text-zinc-400">{ev.note}</p>}
                 </div>
               </div>
-              {ev.p1 ? (
-                <dl className="mt-6 grid gap-3 text-sm sm:grid-cols-3">
-                  {prizes.map(([k, val, first]) => (
-                    <div key={k} className={`rounded-2xl border p-4 ${first ? "border-transparent text-[#0B0B1A]" : "border-white/10 bg-white/[0.03]"}`} style={first ? { background: `linear-gradient(135deg,${c1},${c2})` } : undefined}>
-                      <dt className={first ? "text-[#0B0B1A]/70" : "text-zinc-400"}>{k}</dt>
-                      <dd className={`mt-1 font-semibold ${first ? "" : "text-white"}`}>{val || "Not awarded"}</dd>
-                    </div>
-                  ))}
-                </dl>
-              ) : <p className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-300">Prize details for this event will be announced soon.</p>}
+              {ev.p1 ? <Podium ev={ev} c1={c1} c2={c2} />
+                : <p className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-zinc-300">Prize details for this event will be announced soon.</p>}
               <p className="mt-6 text-sm leading-relaxed text-zinc-400">Rules, team size and entry details are shared at registration. Have a question? Message a coordinator on WhatsApp.</p>
               <div className="sticky bottom-0 -mx-5 mt-6 flex flex-col gap-3 border-t border-white/10 bg-[#0B0D13]/95 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:static sm:mx-0 sm:flex-row sm:border-0 sm:bg-transparent sm:p-0">
-                <a href={CONFIG.registerUrl} target="_blank" rel="noreferrer" className={`${btnGold} sm:flex-1`}>Register for {ev.name} <ArrowUpRight size={16} /></a>
+                <a {...regProps} className={`${btnGold} sm:flex-1`}>Register for {ev.name} <ArrowUpRight size={16} /></a>
                 <a href={waLink(COORDINATORS[0].phone)} target="_blank" rel="noreferrer" className={btnGhost}><MessageCircle size={16} /> Ask on WhatsApp</a>
               </div>
             </div>
@@ -428,16 +512,23 @@ function CategoryPanel({ cat, onCat, onClose }) {
 }
 
 /* ============ Footer: stage lights, pointer spotlight, glowing watermark ============ */
-const STARS = Array.from({ length: 34 }, (_, i) => ({
+const STARS = Array.from({ length: 22 }, (_, i) => ({
   l: (i * 37 + 11) % 100, t: (i * 53 + 7) % 78, d: (i % 9) * 0.45, s: 1 + (i % 3),
 }));
 
 function Footer({ onOpenCat }) {
   const ref = useRef(null);
+  const raf = useRef(0);
+  useOffscreenPause(ref);
   const move = (e) => {
-    const r = ref.current.getBoundingClientRect();
-    ref.current.style.setProperty("--fx", `${e.clientX - r.left}px`);
-    ref.current.style.setProperty("--fy", `${e.clientY - r.top}px`);
+    if (raf.current) return;
+    const { clientX: x, clientY: y } = e;
+    raf.current = requestAnimationFrame(() => {
+      raf.current = 0;
+      const r = ref.current.getBoundingClientRect();
+      ref.current.style.setProperty("--fx", `${x - r.left}px`);
+      ref.current.style.setProperty("--fy", `${y - r.top}px`);
+    });
   };
   const socials = [
     { href: `https://instagram.com/${OFFICIAL.insta}`, label: "Instagram", el: <Instagram size={17} />, ext: true },
@@ -472,14 +563,14 @@ function Footer({ onOpenCat }) {
       <div className="relative mx-auto max-w-6xl px-6">
         {/* closing call to action */}
         <div className="rounded-[2rem] bg-gradient-to-r from-[#9BB4FF]/70 via-white/10 to-[#F2A6D0]/70 p-px shadow-[0_0_80px_-24px_rgba(196,163,255,0.7)]">
-          <div className="relative flex flex-col items-start justify-between gap-8 overflow-hidden rounded-[calc(2rem-1px)] bg-[#0B0C12]/95 px-7 py-10 backdrop-blur-md sm:px-12 sm:py-12 lg:flex-row lg:items-center">
+          <div className="relative flex flex-col items-start justify-between gap-8 overflow-hidden rounded-[calc(2rem-1px)] bg-[#0B0C12]/95 px-7 py-10 sm:px-12 sm:py-12 lg:flex-row lg:items-center">
             <div className="flowbg pointer-events-none absolute inset-0 opacity-30" style={{ backgroundImage: "linear-gradient(120deg,#12152B,#2A1F4D 30%,#3A1F44 55%,#12152B 80%)" }} aria-hidden="true" />
             <div className="relative max-w-xl">
               <h3 className="ez-grad pb-1 text-3xl font-bold leading-tight sm:text-5xl">The stage is set. Your team is next.</h3>
               <p className="mt-3 text-zinc-300">Pick an event, register your team and walk into three days of sport, technology and culture.</p>
             </div>
             <div className="relative flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-              <a href={CONFIG.registerUrl} target="_blank" rel="noreferrer" className={btnGold}>Register now <ArrowUpRight size={16} /></a>
+              <a {...regProps} className={btnGold}>Register now <ArrowUpRight size={16} /></a>
               <a href={waLink(COORDINATORS[0].phone)} target="_blank" rel="noreferrer" className={btnGhost}><MessageCircle size={16} /> Ask a coordinator</a>
             </div>
           </div>
@@ -490,7 +581,7 @@ function Footer({ onOpenCat }) {
           <div className="md:col-span-5">
             <div className="flex items-center gap-3">
               <Logo className="h-14" fallback={false} />
-              <p className="ez-grad text-2xl font-extrabold tracking-wide">ESPLENDIDEZ '27</p>
+              <p className="ez-static text-2xl font-extrabold tracking-wide">ESPLENDIDEZ '27</p>
             </div>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-zinc-400">{CONFIG.tagline}</p>
             <div className="mt-6 flex gap-3">
@@ -543,12 +634,12 @@ function Footer({ onOpenCat }) {
       </div>
 
       {/* bottom bar */}
-      <div className="relative border-t border-white/10 bg-black/30 backdrop-blur-md">
+      <div className="relative border-t border-white/10 bg-black/40">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-6 text-xs text-zinc-500 md:flex-row">
           <p className="text-center md:text-left">© 2027 Esplendidez, Engineering Department, University of Science &amp; Technology Meghalaya</p>
           <p className="inline-flex flex-wrap items-center justify-center gap-x-1.5 rounded-full border border-white/10 bg-white/[0.03] px-4 py-1.5 text-zinc-400">
             Designed and developed by
-            <a href="https://himankashyap.vercel.app" target="_blank" rel="noreferrer" className="ez-grad font-semibold underline decoration-white/20 underline-offset-4 transition hover:decoration-[#C4A3FF]">Himan Kashyap</a>
+            <a href="https://himankashyap.vercel.app" target="_blank" rel="noreferrer" className="ez-static font-semibold underline decoration-white/20 underline-offset-4 transition hover:decoration-[#C4A3FF]">Himan Kashyap</a>
           </p>
           <a href="#home" aria-label="Back to top" className="group inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-zinc-300 transition-all duration-300 hover:-translate-y-0.5 hover:border-[#C4A3FF]/70 hover:text-white hover:shadow-[0_0_28px_-6px_rgba(196,163,255,0.8)]">
             Back to top <ArrowUp size={14} className="transition-transform duration-300 group-hover:-translate-y-0.5" />
@@ -642,13 +733,24 @@ export default function App() {
       .ft-link::before{content:"";width:0;height:1px;background:linear-gradient(90deg,#9BB4FF,#F2A6D0);transition:width .3s ease}
       .ft-link:hover::before{width:14px}
       .ft-wm{opacity:.95}
-      @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.ez-grad,.bulb,.reveal,.beam,.eq,.marq,.float,.rise,.travel,.flowbg,.pop,.ft-spark,.ft-twk{animation:none}.rv{opacity:1;transform:none;transition:none}.bulb{opacity:.8}}`;
+      ::selection{background:#C4A3FF55;color:#fff}
+      html{scrollbar-width:thin;scrollbar-color:#6a5fb5 #07080A}
+      ::-webkit-scrollbar{width:10px}::-webkit-scrollbar-track{background:#07080A}
+      ::-webkit-scrollbar-thumb{background:linear-gradient(#9BB4FF,#C4A3FF,#F2A6D0);border-radius:9999px;border:2px solid #07080A}
+      .ez-static{background:linear-gradient(100deg,#fff,#9BB4FF 35%,#C4A3FF 65%,#F2A6D0);-webkit-background-clip:text;background-clip:text;color:transparent}
+      .beam,.ft-spark,.float,.marq{will-change:transform}
+      .cv{content-visibility:auto;contain-intrinsic-size:auto 900px}
+      [data-off="1"] *{animation-play-state:paused!important}
+      .tilt{transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg));transition:transform .35s cubic-bezier(.2,.7,.2,1);will-change:transform}
+      .podium{display:grid;gap:.75rem}
+      @media (min-width:640px){.podium{grid-template-columns:repeat(var(--n),minmax(0,1fr));align-items:end}}
+      .rise-i{animation:rv .5s ease both;animation-delay:calc(var(--i,0)*70ms)}
+      @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}.ez-grad,.bulb,.reveal,.beam,.eq,.marq,.float,.rise,.rise-i,.travel,.flowbg,.pop,.ft-spark,.ft-twk{animation:none}.rv{opacity:1;transform:none;transition:none}.bulb{opacity:.8}.tilt{transform:none}}`;
     document.head.append(link, style);
     return () => { link.remove(); style.remove(); };
   }, []);
 
   const section = "mx-auto w-full max-w-6xl px-6 py-24";
-  const h2 = `text-4xl font-semibold tracking-tight sm:text-5xl ${silver}`;
 
   return (
     <div className="min-h-screen text-zinc-300 antialiased"
@@ -660,13 +762,16 @@ export default function App() {
       <div ref={progRef} className="fixed left-0 top-0 z-[80] h-[3px] w-full origin-left bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0]" style={{ transform: "scaleX(0)" }} aria-hidden="true" />
 
       {/* Navbar: 3-column grid keeps the links truly centred */}
-      <header className="fixed inset-x-0 top-0 z-50 px-4 pt-4">
-        <nav className="mx-auto grid max-w-6xl grid-cols-[1fr_auto] items-center rounded-full border border-white/10 bg-black/60 px-5 py-2.5 shadow-lg shadow-black/40 backdrop-blur-xl md:grid-cols-[1fr_auto_1fr]" aria-label="Main">
-          <a href="#home" className="flex items-center gap-3">
+      <header className="fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-4 sm:pt-4">
+        <nav className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-full border border-white/10 bg-[#07080A]/80 py-2 pl-3 pr-2 shadow-lg shadow-black/40 backdrop-blur-md sm:px-5 sm:py-2.5 md:grid-cols-[1fr_auto_1fr]" aria-label="Main">
+          <a href="#home" className="flex min-w-0 items-center gap-2.5 sm:gap-3">
             <Logo className="h-9" />
-            <span className="flex flex-col leading-none">
-              <span className="ez-grad text-lg font-bold tracking-wide">ESPLENDIDEZ '27</span>
-              <span className="ez-grad mt-1 pb-0.5 text-[9px] font-medium tracking-wide">Department of Engineering & Technology - USTM</span>
+            <span className="flex min-w-0 flex-col leading-none">
+              <span className="ez-static truncate text-[15px] font-bold tracking-wide sm:text-lg">ESPLENDIDEZ '27</span>
+              <span className="ez-static mt-1 truncate pb-0.5 text-[8.5px] font-medium tracking-wide sm:text-[9px]">
+                <span className="sm:hidden">Engineering &amp; Technology · USTM</span>
+                <span className="hidden sm:inline">Department of Engineering &amp; Technology - USTM</span>
+              </span>
             </span>
           </a>
           <ul className="hidden items-center gap-1 md:flex">
@@ -675,92 +780,31 @@ export default function App() {
             ))}
           </ul>
           <div className="flex items-center justify-end gap-2">
-            <a href={CONFIG.registerUrl} target="_blank" rel="noreferrer" className={`${btnGold} !px-5 !py-2 hidden sm:inline-flex`}>Register <ArrowUpRight size={14} /></a>
-            <button className="grid h-10 w-10 place-items-center rounded-full border border-white/10 md:hidden" onClick={() => setMenu(!menu)} aria-label="Toggle menu" aria-expanded={menu}>
+            <ThemeToggle />
+            <a {...regProps} className={`${btnGold} !px-5 !py-2 max-sm:hidden`}>Register <ArrowUpRight size={14} /></a>
+            <button className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-white/10 md:hidden" onClick={() => setMenu(!menu)} aria-label="Toggle menu" aria-expanded={menu}>
               {menu ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
         </nav>
-        <div className={`mx-auto max-w-6xl overflow-hidden rounded-3xl border border-white/10 bg-black/80 backdrop-blur-xl transition-all duration-300 md:hidden ${menu ? "mt-2 max-h-96 opacity-100" : "max-h-0 border-transparent opacity-0"}`}>
+        <div className={`mx-auto max-w-6xl overflow-hidden rounded-3xl border border-white/10 bg-[#07080A]/95 transition-all duration-300 md:hidden ${menu ? "mt-2 max-h-96 opacity-100" : "max-h-0 border-transparent opacity-0"}`}>
           <ul className="p-3">
             {NAV.map((n) => <li key={n}><a href={`#${n.toLowerCase()}`} onClick={() => setMenu(false)} className="block rounded-xl px-4 py-3 text-white hover:bg-white/5">{n}</a></li>)}
           </ul>
-          <div className="p-3 pt-0"><a href={CONFIG.registerUrl} className={`${btnGold} w-full`}>Register now</a></div>
+          <div className="p-3 pt-0"><a {...regProps} className={`${btnGold} w-full`}>Register now</a></div>
         </div>
       </header>
 
       {/* Hero: video fills the first screen, then fades into the page */}
-      <section id="home" onPointerMove={onHeroMove} className="relative overflow-hidden pb-16 pt-24 lg:flex lg:min-h-screen lg:items-center lg:pb-28 lg:pt-32">
-        {/* Video: a full 16:9 frame on phones and tablets, a full-bleed backdrop on desktop */}
-        <div className="relative z-0 aspect-video w-full bg-gradient-to-br from-[#12152B] to-[#1B1228] lg:absolute lg:inset-0 lg:aspect-auto">
-          {!vFail && (
-            <video ref={bgRef} src={CONFIG.videoSrc} autoPlay loop muted playsInline preload="auto"
-              onError={() => setVFail(true)} className="h-full w-full object-cover" />
-          )}
-          <div className="pointer-events-none absolute inset-0 bg-[#07080A]/5 lg:bg-[#07080A]/20" />
-          <div className="pointer-events-none absolute inset-0 hidden bg-gradient-to-r from-[#07080A]/75 via-[#07080A]/15 to-transparent lg:block" />
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[#07080A] to-transparent lg:h-48" />
-          {!vFail && (
-            <div className="absolute bottom-3 right-3 z-20 flex gap-2 lg:bottom-8 lg:right-6">
-              <button onClick={togglePlay} aria-label={playing ? "Pause background video" : "Play background video"} className="grid h-10 w-10 place-items-center rounded-full border border-white/20 bg-black/50 backdrop-blur-md transition hover:bg-white/15">
-                {playing ? <Pause size={15} /> : <Play size={15} />}
-              </button>
-              <button onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} className="grid h-10 w-10 place-items-center rounded-full border border-white/20 bg-black/50 backdrop-blur-md transition hover:bg-white/15">
-                {muted ? <VolumeX size={15} /> : <Volume2 size={15} />}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="pointer-events-none absolute inset-0 hidden lg:block" style={{ background: "radial-gradient(520px circle at calc(var(--px,60)*1%) calc(var(--py,40)*1%), rgba(155,180,255,0.14), transparent 65%)" }} aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-0 hidden opacity-40 lg:block">{!teaser && <ParticleWave />}</div>
-        <FloatIcons show="hidden lg:block" items={[
-          { Icon: Cpu, pos: "right-[8%] top-[24%]", depth: 26, dur: 7 },
-          { Icon: Gamepad2, pos: "right-[24%] top-[15%]", depth: -18, dur: 8, del: 0.6 },
-          { Icon: Music, pos: "right-[13%] top-[47%]", depth: 34, dur: 6.5, del: 1 },
-          { Icon: Trophy, pos: "right-[29%] top-[60%]", depth: -24, dur: 9, del: 0.3 },
-          { Icon: Lightbulb, pos: "right-[6%] top-[70%]", depth: 20, dur: 7.5, del: 1.4 },
-          { Icon: Sparkles, pos: "right-[37%] top-[32%]", depth: -30, dur: 8.5, del: 0.9 },
-        ]} />
-
-        {/* Tagline dock: under the video on phones, along the bottom edge on desktop, so it never covers the footage */}
-        <div className="rise pointer-events-none relative z-10 px-5 pt-5 lg:absolute lg:inset-x-0 lg:bottom-9 lg:flex lg:justify-center lg:p-0" style={{ animationDelay: ".15s" }}>
-          <div className="mx-auto w-fit max-w-full rounded-2xl bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0] p-px lg:mx-0 lg:rounded-full">
-            <p className="flex items-center justify-center gap-2.5 rounded-[calc(1rem-1px)] bg-[#0B0C12]/90 px-5 py-3 text-center text-[10.5px] font-medium uppercase leading-relaxed tracking-[0.14em] text-white backdrop-blur-md sm:text-xs lg:rounded-full lg:text-[13px] lg:tracking-[0.18em]">
-              <Flame size={16} className="shrink-0 text-[#C4A3FF]" />{CONFIG.tagline}
-            </p>
-          </div>
-        </div>
-
-        <div className="pointer-events-none relative z-10 mx-auto w-full max-w-6xl px-6 pt-8 lg:pt-0">
-          <div className="pointer-events-auto max-w-3xl">
-            <div className="rise" style={{ animationDelay: ".05s" }}><Logo className="mb-6 h-16 sm:h-20" fallback={false} /></div>
-            <div className="rise" style={{ animationDelay: ".3s" }}>
-              <h1 className="ez-grad text-[clamp(2rem,9.5vw,4.75rem)] font-extrabold leading-[1.05] tracking-tight">ESPLENDIDEZ<br />'27</h1>
-            </div>
-            <div className="rise mt-7 max-w-xl [text-shadow:0_2px_24px_rgba(0,0,0,0.55)]" style={{ animationDelay: ".45s" }}>
-              <p className="text-xl font-light leading-[1.6] tracking-[-0.01em] text-zinc-300 sm:text-[1.7rem]">
-                The flagship fest of the Engineering Department at USTM, run by its{" "}
-                <span className="relative inline-block whitespace-nowrap">
-                  <span className="ez-grad inline-block pb-1 font-semibold">first engineering batch.</span>
-                  <span className="absolute inset-x-0 bottom-0 h-[2px] rounded-full bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0] shadow-[0_0_14px_rgba(196,163,255,0.85)]" aria-hidden="true" />
-                </span>
-              </p>
-              <div className="mt-5 flex items-center gap-4">
-                <span className="h-0.5 w-12 shrink-0 rounded-full bg-gradient-to-r from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0]" />
-                <p className="ez-grad pb-0.5 text-lg font-semibold leading-snug tracking-wide [filter:drop-shadow(0_2px_14px_rgba(0,0,0,0.65))] [text-shadow:none] sm:text-xl">Where sport, technology and culture share one stage.</p>
-              </div>
-            </div>
-            <div className="rise mt-8 flex flex-wrap gap-3" style={{ animationDelay: ".6s" }}>
-              <a href="#events" className={btnGold}>Explore events <ArrowUpRight size={16} /></a>
-              <button onClick={() => setTeaser(true)} className={btnGhost}><Play size={15} /> Watch teaser</button>
-            </div>
-            <a href="#updates" className="rise mt-6 inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-4 py-2 text-sm text-zinc-200 backdrop-blur-md transition hover:border-zinc-400/60" style={{ animationDelay: ".75s" }}>
-              <Lightbulb size={15} className="text-[#C4A3FF]" /> Stay tuned for updates <ArrowUpRight size={14} />
-            </a>
-          </div>
-        </div>
-      </section>
+      <Hero
+        videoSrc={CONFIG.videoSrc}
+        tagline={CONFIG.tagline}
+        logo={<Logo className="h-14 sm:h-16" fallback={false} />}
+        words={CAT_LIST}
+        paused={teaser}
+        onTeaser={() => setTeaser(true)}
+        wave={!teaser && <ParticleWave />}
+      />
 
       {/* Stats */}
       <div className="border-y border-white/10 bg-white/[0.02]">
@@ -768,7 +812,7 @@ export default function App() {
           {STATS.map(({ icon: Icon, value, label }) => (
             <div key={label} className="flex flex-col items-center gap-1 text-center">
               <Icon size={16} className="text-[#A9B6FF]" />
-              <span className={`text-2xl font-semibold ${silver}`}>{value}</span>
+              <span className={`text-2xl font-semibold ${silver}`}><CountUp value={value} /></span>
               <span className="text-sm text-zinc-400">{label}</span>
             </div>
           ))}
@@ -776,11 +820,9 @@ export default function App() {
       </div>
 
       {/* Events */}
-      <section id="events" className={section}>
-        <Reveal>
-          <h2 className={h2}>Events</h2>
-          <p className="mt-3 max-w-lg text-zinc-300">{EVENTS.length} events across {CAT_LIST.length} arenas. Open an arena to explore its events and register.</p>
-        </Reveal>
+      <section id="events" className={`${section} relative isolate`}>
+        <SectionGlow />
+        <SectionHead n="01" title="Events" sub={`${EVENTS.length} events across ${CAT_LIST.length} arenas. Open an arena to explore its events and register.`} />
         <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-6">
           {CAT_LIST.map((c, i) => (
             <Reveal key={c} delay={i * 0.08} className={`h-full ${c === "Sports" ? "sm:col-span-2 lg:col-span-4" : "lg:col-span-2"}`}>
@@ -791,11 +833,15 @@ export default function App() {
       </section>
 
       {/* Stay tuned */}
-      <section id="updates" className={section}><Reveal><UpdatesSign /></Reveal></section>
+      <section id="updates" className={`${section} relative isolate`}>
+        <SectionGlow c1="196,163,255" c2="155,180,255" side="right" />
+        <Reveal><UpdatesSign /></Reveal>
+      </section>
 
       {/* Schedule */}
-      <section id="schedule" className={section}>
-        <Reveal><h2 className={h2}>Schedule</h2></Reveal>
+      <section id="schedule" className={`${section} cv relative isolate`}>
+        <SectionGlow c1="143,211,255" c2="196,163,255" side="right" />
+        <SectionHead n="02" title="Schedule" />
         <p className="mt-3 text-sm text-zinc-400">Timings are tentative and confirmed with registered teams.</p>
         <div className="mt-8 grid grid-cols-3 gap-3" role="tablist">
           {SCHEDULE.map((d, i) => (
@@ -819,8 +865,8 @@ export default function App() {
                 </span>
                 <p className="pt-2.5 text-sm font-semibold" style={{ color }}>{g.slot}</p>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {g.items.map(([, label, Icon, hl]) => hl === "headliner" ? <Headliner key={label} /> : (
-                    <div key={label} className={`flex items-center gap-3 rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-0.5 ${hl ? "border-[#C4A3FF]/50 bg-gradient-to-r from-[#9BB4FF]/10 to-[#F2A6D0]/10" : "border-white/10 bg-white/[0.035] hover:border-zinc-500/50"}`}>
+                  {g.items.map(([, label, Icon, hl], idx) => hl === "headliner" ? <Headliner key={label} /> : (
+                    <div key={label} style={{ "--i": idx }} className={`rise-i flex items-center gap-3 rounded-2xl border p-4 transition-all duration-300 hover:-translate-y-0.5 ${hl ? "border-[#C4A3FF]/50 bg-gradient-to-r from-[#9BB4FF]/10 to-[#F2A6D0]/10" : "border-white/10 bg-white/[0.035] hover:border-zinc-500/50"}`}>
                       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl" style={{ background: `${color}1f`, color }}><Icon size={18} /></span>
                       <span className="text-white">{label}</span>
                       {hl && <span className="ml-auto shrink-0 rounded-full border border-white/15 px-2 py-0.5 text-[10px] text-zinc-300">Highlight</span>}
@@ -834,7 +880,8 @@ export default function App() {
       </section>
 
       {/* About */}
-      <section id="about" className={`${section} relative`}>
+      <section id="about" className={`${section} relative isolate cv`}>
+        <SectionGlow c1="242,166,208" c2="155,180,255" />
         <FloatIcons items={[
           { Icon: Star, pos: "right-[4%] top-16", depth: 0, dur: 8 },
           { Icon: Sparkles, pos: "left-[2%] bottom-28", depth: 0, dur: 7, del: 1 },
@@ -865,7 +912,7 @@ export default function App() {
                 <div className="ml-8 flex items-center gap-3" aria-hidden="true"><span className="h-10 w-px bg-gradient-to-b from-[#9BB4FF] to-[#F2A6D0]" /><Sparkles size={14} className="text-[#C4A3FF]" /></div>
                 <div className="rounded-2xl bg-gradient-to-br from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0] p-px shadow-[0_0_50px_-18px_rgba(196,163,255,0.6)]">
                   <div className="rounded-[calc(1rem-1px)] bg-[#0C0E14] p-6">
-                    <p className="ez-grad text-4xl font-extrabold">2027</p>
+                    <p className="ez-static text-4xl font-extrabold">2027</p>
                     <p className="mt-1 text-lg font-medium text-white">USTM</p>
                     <p className="mt-2 text-sm text-zinc-300">Esplendidez, organised by the first engineering batch of USTM.</p>
                   </div>
@@ -881,7 +928,7 @@ export default function App() {
               <span className="pointer-events-none absolute -left-4 top-1/2 hidden -translate-y-1/2 select-none text-[9rem] font-extrabold leading-none lg:block" style={{ WebkitTextStroke: "1px rgba(255,255,255,0.09)", color: "transparent" }} aria-hidden="true">2011</span>
               <span className="pointer-events-none absolute -right-4 top-1/2 hidden -translate-y-1/2 select-none text-[9rem] font-extrabold leading-none lg:block" style={{ WebkitTextStroke: "1px rgba(255,255,255,0.09)", color: "transparent" }} aria-hidden="true">2027</span>
               <div className="relative">
-                <span className="mx-auto grid h-14 w-14 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-[#C4A3FF] shadow-[0_0_40px_-8px_rgba(196,163,255,0.7)] backdrop-blur-md"><Flame size={22} /></span>
+                <span className="mx-auto grid h-14 w-14 place-items-center rounded-full border border-white/15 bg-white/[0.06] text-[#C4A3FF] shadow-[0_0_40px_-8px_rgba(196,163,255,0.7)]"><Flame size={22} /></span>
                 <blockquote className="mx-auto mt-8 max-w-3xl">
                   <p className="ez-grad pb-1 text-3xl font-semibold leading-snug sm:text-5xl">{CONFIG.tagline}</p>
                 </blockquote>
@@ -897,8 +944,9 @@ export default function App() {
       </section>
 
       {/* Contact */}
-      <section id="contact" className={section}>
-        <Reveal><h2 className={h2}>Contact</h2></Reveal>
+      <section id="contact" className={`${section} cv relative isolate`}>
+        <SectionGlow c1="196,163,255" c2="143,211,255" side="right" />
+        <SectionHead n="03" title="Contact" />
         <div className="mt-8 grid gap-4 md:grid-cols-2">
           <a href={`mailto:${OFFICIAL.email}`} className={`${card} flex items-center gap-4 p-5`}><span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-[#9BB4FF]/25 to-[#F2A6D0]/25 text-[#C4A3FF]"><Mail size={20} /></span><div><p className="text-xs text-zinc-400">Official email</p><p className="text-white">{OFFICIAL.email}</p></div></a>
           <a href={`https://instagram.com/${OFFICIAL.insta}`} target="_blank" rel="noreferrer" className={`${card} flex items-center gap-4 p-5`}><span className="grid h-11 w-11 place-items-center rounded-xl bg-gradient-to-br from-[#9BB4FF]/25 to-[#F2A6D0]/25 text-[#C4A3FF]"><Instagram size={20} /></span><div><p className="text-xs text-zinc-400">Instagram</p><p className="text-white">@{OFFICIAL.insta}</p></div></a>
@@ -911,10 +959,12 @@ export default function App() {
               <span className="mb-4 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-[#9BB4FF] via-[#C4A3FF] to-[#F2A6D0] font-semibold text-[#0B0B1A]">{c.name.split(" ").map((w) => w[0]).join("")}</span>
               <p className="text-lg font-semibold text-white">{c.name}</p>
               <p className="text-sm text-[#A9B6FF]">{c.role}</p>
-              <div className="mt-4 space-y-2 text-sm text-zinc-300">
-                <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:text-white"><Mail size={15} className="text-zinc-500" />{c.email}</a>
-                <a href={`https://instagram.com/${c.insta}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-white"><span className="text-zinc-500"><Instagram size={15} /></span>@{c.insta}</a>
-              </div>
+              {(c.email || c.insta) && (
+                <div className="mt-4 space-y-2 text-sm text-zinc-300">
+                  {c.email && <a href={`mailto:${c.email}`} className="flex items-center gap-2 hover:text-white"><Mail size={15} className="text-zinc-500" />{c.email}</a>}
+                  {c.insta && <a href={`https://instagram.com/${c.insta}`} target="_blank" rel="noreferrer" className="flex items-center gap-2 hover:text-white"><span className="text-zinc-500"><Instagram size={15} /></span>@{c.insta}</a>}
+                </div>
+              )}
               <a href={waLink(c.phone)} target="_blank" rel="noreferrer" className={`${btnGold} mt-6`}><MessageCircle size={16} /> Message on WhatsApp</a>
             </div>
           ))}
